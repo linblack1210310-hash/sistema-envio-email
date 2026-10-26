@@ -1,7 +1,6 @@
 package com.sistemaemail.correos_masivos.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -10,54 +9,38 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.List;
 import java.util.Map;
 
 @Service
 public class EmailService {
 
-    @Value("${sendgrid.api-key}")
-    private String apiKey;
+    @Value("${cloudflare.worker.url}")
+    private String workerUrl;
 
-    @Value("${sendgrid.from}")
-    private String remitente;
-
-    @Value("${sendgrid.to}")
-    private String destinatario;
+    @Value("${cloudflare.worker.token}")
+    private String workerToken;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public void enviar(String nombre, String email, String mensaje) throws IOException {
 
-        if (apiKey.isBlank() || remitente.isBlank() || destinatario.isBlank()) {
-            throw new IOException("Faltan variables de entorno de SendGrid");
+        if (workerUrl == null || workerUrl.isBlank() || workerToken == null || workerToken.isBlank()) {
+            throw new IOException("Faltan las credenciales del Worker de Cloudflare en application.properties");
         }
 
-        Map<String, Object> contenido = Map.of(
-            "personalizations", List.of(
-                Map.of(
-                    "to", List.of(Map.of("email", destinatario)),
-                    "subject", "Nuevo mensaje de " + nombre
-                )
-            ),
-            "from", Map.of("email", remitente),
-            "reply_to", Map.of("email", email),
-            "content", List.of(
-                Map.of(
-                    "type", "text/plain",
-                    "value", "Nombre: " + nombre
-                        + "\nCorreo: " + email
-                        + "\n\nMensaje:\n" + mensaje
-                )
-            )
+        // Estructura que espera tu Cloudflare Worker
+        Map<String, Object> payload = Map.of(
+            "nombre", nombre,
+            "email", email,
+            "mensaje", mensaje
         );
 
-        String json = objectMapper.writeValueAsString(contenido);
+        String json = objectMapper.writeValueAsString(payload);
 
         HttpRequest request = HttpRequest.newBuilder()
-            .uri(URI.create("https://api.sendgrid.com/v3/mail/send"))
-            .header("Authorization", "Bearer " + apiKey)
+            .uri(URI.create(workerUrl))
+            .header("X-Api-Token", workerToken)
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(json))
             .build();
@@ -68,7 +51,7 @@ public class EmailService {
 
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new IOException(
-                    "Error de SendGrid. Código HTTP: " + response.statusCode());
+                    "Error en Cloudflare Worker. Código HTTP: " + response.statusCode() + " - " + response.body());
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
